@@ -4,6 +4,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import { getModel, publicCatalog } from './models.js';
 import { metaConfigured, searchAds, testConnection, publishCreative, metaPublishConfig } from './meta.js';
+import { deepScrape } from './scraper.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -262,6 +263,22 @@ app.get(
       res.json(result);
     } catch (err) {
       throw new KieError(err.message || 'Meta Ad Library request failed.', 400);
+    }
+  })
+);
+
+// Deep-scrape a single ad snapshot for extra detail (followers, caption, link,
+// display format, all media) + optional headless engagement counts.
+app.get(
+  '/api/spy/scrape',
+  asyncRoute(async (req, res) => {
+    const snapshotUrl = req.query.snapshotUrl;
+    if (!snapshotUrl) throw new KieError('snapshotUrl is required.', 400);
+    try {
+      const data = await deepScrape(snapshotUrl);
+      res.json(data);
+    } catch (err) {
+      throw new KieError(err.message || 'Scrape failed.', 400);
     }
   })
 );

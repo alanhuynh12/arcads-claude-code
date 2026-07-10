@@ -502,12 +502,20 @@ function applySpyFilters() {
   renderAds(ads);
 }
 
+function abbrevNum(n) {
+  n = Number(n) || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+  return String(n);
+}
+
 function metricBadges(ad) {
   const b = [];
   if (ad.daysRunning != null) {
     const hot = ad.daysRunning >= 30 ? ' hot' : '';
     b.push(`<span class="ad-stat${hot}" title="Days running (winner signal)">🗓 ${ad.daysRunning}d</span>`);
   }
+  if (ad.pageLikeCount) b.push(`<span class="ad-stat" title="Advertiser page followers">👥 ${abbrevNum(ad.pageLikeCount)}</span>`);
   if (ad.reach) b.push(`<span class="ad-stat" title="EU total reach">👁 ${ad.reach.label}</span>`);
   if (ad.impressions) b.push(`<span class="ad-stat" title="Impressions">📊 ${ad.impressions.label}</span>`);
   if (ad.spend) b.push(`<span class="ad-stat" title="Spend${ad.currency ? ' (' + ad.currency + ')' : ''}">💰 ${ad.spend.label}</span>`);
@@ -534,8 +542,10 @@ function renderAds(ads) {
         <div class="ad-dates">${dates}</div>
         <div class="ad-plats">${plats}</div>
         ${ad.body ? `<div class="ad-body">${ad.body}</div>` : ''}
+        <div class="ad-scrape hidden"></div>
         <div class="ad-actions">
           <a class="pill-btn" href="${ad.snapshotUrl}" target="_blank" rel="noopener">View</a>
+          <button class="pill-btn scrape-this" title="Extract followers, caption, link + engagement">Scrape</button>
           <button class="pill-btn primary clone-this">Clone</button>
         </div>
       </div>`;
@@ -547,8 +557,43 @@ function renderAds(ads) {
       }
       openCloneSheet({ referenceImageUrl: imgUrl, previewSrc: imgUrl, meta: `${ad.pageName} · ${dates}` });
     });
+    $('.scrape-this', card).addEventListener('click', (e) => scrapeAd(ad, card, e.currentTarget));
     grid.appendChild(card);
   });
+}
+
+async function scrapeAd(ad, card, btn) {
+  const box = $('.ad-scrape', card);
+  box.classList.remove('hidden');
+  box.innerHTML = '<div class="scrape-loading">Scraping snapshot…</div>';
+  btn.disabled = true;
+  try {
+    const d = await api('/api/spy/scrape?snapshotUrl=' + encodeURIComponent(ad.snapshotUrl));
+    const rows = [];
+    if (d.pageLikeCount) rows.push(['Followers', abbrevNum(d.pageLikeCount)]);
+    if (d.displayFormat) rows.push(['Format', d.displayFormat]);
+    if (d.cta) rows.push(['CTA', d.cta]);
+    if (d.linkUrl) rows.push(['Link', `<a href="${d.linkUrl}" target="_blank" rel="noopener">${d.linkUrl.slice(0, 40)}…</a>`]);
+    if (d.caption) rows.push(['Caption', d.caption]);
+    if (d.engagement) {
+      const e = d.engagement;
+      const eng = [e.reactions && `👍 ${e.reactions}`, e.comments && `💬 ${e.comments}`, e.shares && `↗ ${e.shares}`]
+        .filter(Boolean)
+        .join('  ');
+      if (eng) rows.push(['Engagement', eng]);
+    }
+    const mediaCount = (d.images?.length || 0) + (d.videos?.length || 0);
+    if (mediaCount) rows.push(['Media', `${d.images?.length || 0} image(s), ${d.videos?.length || 0} video(s)`]);
+
+    const html = rows.map(([k, v]) => `<div class="scrape-row"><span>${k}</span><b>${v}</b></div>`).join('');
+    box.innerHTML =
+      (html || '<div class="scrape-row">No extra detail found.</div>') +
+      (d.engagementNote ? `<div class="scrape-note">${d.engagementNote}</div>` : '');
+  } catch (e) {
+    box.innerHTML = `<div class="scrape-note">Scrape failed: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /* ---------------------------------------------------------------- clone ---- */

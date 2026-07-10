@@ -47,8 +47,31 @@ Each ad card shows the metrics the API actually returns:
 > impressions/spend are returned **only** for political/issue ads (reach only for
 > EU ads). That's a Meta restriction, not a bug. For commercial competitors,
 > **days running** is the reliable "is this a winner?" signal, which is why it's
-> shown on every card and is filterable/sortable. Third-party spy tools that show
-> likes/views obtain them by scraping, not via this API.
+> shown on every card and is filterable/sortable.
+
+### Deep scrape
+
+Each ad card has a **Scrape** button that reads the ad's public snapshot page
+and pulls out what the API leaves out — with **no browser required**:
+
+- **Followers** 👥 (advertiser `page_like_count` — a brand-size signal)
+- **Display format**, **CTA**, **destination link**, and full **caption**
+- All **image + video** variants
+
+Because per-ad engagement isn't in the snapshot for commercial ads, an
+**optional headless mode** can try to read reaction/comment/share counts where an
+ad embeds the organic post:
+
+```bash
+# in web/.env
+SPY_HEADLESS=true
+# then install the optional browser:
+npm i playwright && npx playwright install chromium
+```
+
+When headless is off (default), Scrape still returns all the static fields above
+plus a note explaining engagement isn't available via the API. Playwright is an
+**optional dependency** — the app runs fine without it.
 
 Hit **Clone** on any ad (or **Upload an ad to clone** from a screenshot) and the
 studio recreates it for *your* product:
@@ -132,7 +155,8 @@ npm start
 | Seedance / Sora / Nano Banana | KIE `POST /api/v1/jobs/createTask` → poll `GET /api/v1/jobs/recordInfo` |
 | Reference / clone image upload | KIE `POST /api/v1/file-base64-upload` · `file-url-upload` |
 | Credits | KIE `GET /api/v1/chat/credit` |
-| Competitor Spy | Meta `GET graph.facebook.com/{v}/ads_archive` + snapshot scrape |
+| Competitor Spy | Meta `GET graph.facebook.com/{v}/ads_archive` |
+| Deep scrape | fetch `ad_snapshot_url` → parse embedded data (optional Playwright) |
 | Clone | rehost creative → KIE generate with it as a reference image |
 | Publish to Meta | Meta `/adimages` · `/advideos` → `/ads` (PAUSED) or `/adcreatives` |
 
@@ -146,7 +170,8 @@ exact JSON body KIE expects. **Adding a new KIE model is just one entry.**
 web/
 ├── server.js        # Express proxy — keeps keys server-side, normalizes responses
 ├── models.js        # KIE model catalog + request builders
-├── meta.js          # Meta Ad Library search + creative extraction
+├── meta.js          # Meta Ad Library search / filters / metrics + publish
+├── scraper.js       # Ad snapshot scraper (static fields + optional headless engagement)
 ├── public/
 │   ├── index.html   # macOS-style window shell (Video / Image / Spy / Gallery)
 │   ├── styles.css   # vibrancy / frosted glass, light + dark

@@ -10,6 +10,8 @@
 // ads); issue/political ads are always covered. When the API returns nothing,
 // the universal fallback is to upload a screenshot of the ad and clone that.
 
+import { extractSnapshotData } from './scraper.js';
+
 const API_VERSION = process.env.META_API_VERSION || 'v23.0';
 const BASE_URL = `https://graph.facebook.com/${API_VERSION}`;
 
@@ -216,41 +218,19 @@ async function enrichCreative(ads) {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; KIEStudio/1.0)' },
       });
       const html = await res.text();
-      const media = extractCreative(html);
-      ad.images = media.images;
-      ad.videos = media.videos;
-      ad.preview = media.preview;
+      const d = extractSnapshotData(html);
+      ad.images = d.images;
+      ad.videos = d.videos;
+      ad.preview = d.preview;
+      ad.pageLikeCount = d.pageLikeCount;
+      ad.cta = d.cta;
+      ad.linkUrl = d.linkUrl;
+      ad.displayFormat = d.displayFormat;
+      if (!ad.body && d.body) ad.body = d.body;
     } catch {
       /* leave preview null; UI falls back to the snapshot link */
     }
   });
-}
-
-const unescapeUrl = (s) =>
-  s.replace(/\\\//g, '/').replace(/\\u0026/g, '&').replace(/\\u003D/gi, '=').replace(/&amp;/g, '&');
-
-export function extractCreative(html) {
-  const images = new Set();
-  const videos = new Set();
-  const posters = new Set();
-
-  const grab = (re, into) => {
-    let m;
-    while ((m = re.exec(html)) !== null) {
-      const url = unescapeUrl(m[1]);
-      if (url.startsWith('http')) into.add(url);
-    }
-  };
-
-  grab(/"original_image_url":"(https:[^"]+)"/g, images);
-  grab(/"resized_image_url":"(https:[^"]+)"/g, images);
-  grab(/"video_hd_url":"(https:[^"]+)"/g, videos);
-  grab(/"video_sd_url":"(https:[^"]+)"/g, videos);
-  grab(/"video_preview_image_url":"(https:[^"]+)"/g, posters);
-
-  const imgList = [...images];
-  const preview = [...posters][0] || imgList[0] || null;
-  return { images: imgList, videos: [...videos], preview };
 }
 
 // --------------------------------------------------------------- publish ---
