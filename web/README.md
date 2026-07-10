@@ -58,20 +58,18 @@ and pulls out what the API leaves out — with **no browser required**:
 - **Display format**, **CTA**, **destination link**, and full **caption**
 - All **image + video** variants
 
-Because per-ad engagement isn't in the snapshot for commercial ads, an
-**optional headless mode** can try to read reaction/comment/share counts where an
-ad embeds the organic post:
+Because per-ad engagement isn't in the snapshot for commercial ads, a
+**headless mode** tries to read reaction/comment/share counts where an ad embeds
+the organic post. **It's on by default and works out of the box** — `npm install`
+automatically downloads Chromium (via a postinstall hook; as root it also pulls
+the required system libraries with `--with-deps`).
 
-```bash
-# in web/.env
-SPY_HEADLESS=true
-# then install the optional browser:
-npm i playwright && npx playwright install chromium
-```
+- Disable the headless step: set `SPY_HEADLESS=false` in `web/.env`.
+- Skip the browser download at install time: `KIE_SKIP_BROWSER=1 npm install`.
+- Re-install the browser later: `npm run setup:headless`.
 
-When headless is off (default), Scrape still returns all the static fields above
-plus a note explaining engagement isn't available via the API. Playwright is an
-**optional dependency** — the app runs fine without it.
+If Chromium isn't present, Scrape still returns all the static fields above plus
+a one-line hint on how to enable the headless step — it never errors.
 
 Hit **Clone** on any ad (or **Upload an ad to clone** from a screenshot) and the
 studio recreates it for *your* product:

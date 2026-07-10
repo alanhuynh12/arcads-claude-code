@@ -129,12 +129,15 @@ export async function deepScrape(snapshotUrl) {
   const html = await fetchHtml(snapshotUrl);
   const data = extractSnapshotData(html);
   data.source = 'static';
-  data.headlessEnabled = process.env.SPY_HEADLESS === 'true';
+  // Headless is ON by default (opt out with SPY_HEADLESS=false). It degrades
+  // gracefully when Playwright/Chromium isn't installed.
+  data.headlessEnabled = process.env.SPY_HEADLESS !== 'false';
 
   if (data.headlessEnabled) {
     const eng = await headlessEngagement(snapshotUrl);
     if (eng?.unavailable) {
-      data.engagementNote = 'Headless enabled but Playwright is not installed. Run: npm i playwright && npx playwright install chromium';
+      data.engagementNote =
+        'Headless browser not installed — run `npm run setup:headless` (or `npx playwright install --with-deps chromium`) to enable engagement scraping.';
     } else if (eng?.headlessError) {
       data.engagementNote = 'Headless scrape error: ' + eng.headlessError;
     } else if (eng && (eng.reactions || eng.comments || eng.shares)) {
@@ -144,8 +147,7 @@ export async function deepScrape(snapshotUrl) {
       data.engagementNote = 'No public engagement counts were present on this ad snapshot.';
     }
   } else {
-    data.engagementNote =
-      'Per-ad likes/comments are not in the Ad Library snapshot for commercial ads. Set SPY_HEADLESS=true (+ Playwright) to attempt extraction where a post is embedded.';
+    data.engagementNote = 'Headless scraping disabled (SPY_HEADLESS=false).';
   }
   return data;
 }
