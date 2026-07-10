@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import dotenv from 'dotenv';
 import { getModel, publicCatalog } from './models.js';
+import { metaConfigured, searchAds } from './meta.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -72,6 +73,38 @@ function safeParse(value) {
   }
 }
 
+// KIE upload host/paths shift between /api/v1/... and /api/...; try both.
+async function kieUpload(paths, body) {
+  let lastErr;
+  for (const p of paths) {
+    try {
+      const json = await kieFetch(p, { method: 'POST', body });
+      const url = json.data?.downloadUrl || json.data?.url || json.data?.fileUrl;
+      if (url) return url;
+      lastErr = new KieError('Upload returned no URL.', 502);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new KieError('Upload failed.', 502);
+}
+
+function uploadBase64(dataUrl, dir = 'kie-studio/uploads') {
+  return kieUpload(['/api/v1/file-base64-upload', '/api/file-base64-upload'], {
+    base64Data: dataUrl,
+    uploadPath: dir,
+    fileName: `f-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  });
+}
+
+function uploadFromUrl(fileUrl, dir = 'kie-studio/spy') {
+  return kieUpload(['/api/v1/file-url-upload', '/api/file-url-upload'], {
+    fileUrl,
+    uploadPath: dir,
+    fileName: `ad-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  });
+}
+
 function asyncRoute(fn) {
   return (req, res) => {
     Promise.resolve(fn(req, res)).catch((err) => {
@@ -83,7 +116,7 @@ function asyncRoute(fn) {
 
 // ---------------------------------------------------------------- routes ----
 app.get('/api/config', (req, res) => {
-  res.json({ hasKey: Boolean(KIE_API_KEY), baseUrl: KIE_BASE_URL });
+  res.json({ hasKey: Boolean(KIE_API_KEY), hasMetaToken: metaConfigured(), baseUrl: KIE_BASE_URL });
 });
 
 app.get('/api/models', (req, res) => {
@@ -110,21 +143,11 @@ app.post(
     if (images.length > 8) throw new KieError('Too many images (max 8).', 400);
 
     const urls = [];
-    for (const [i, dataUrl] of images.entries()) {
+    for (const dataUrl of images) {
       if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
         throw new KieError('Each image must be a base64 data URL.', 400);
       }
-      const json = await kieFetch('/api/v1/file-base64-upload', {
-        method: 'POST',
-        body: {
-          base64Data: dataUrl,
-          uploadPath: 'kie-studio/uploads',
-          fileName: `ref-${Date.now()}-${i}`,
-        },
-      });
-      const url = json.data?.downloadUrl || json.data?.url || json.data?.fileUrl;
-      if (!url) throw new KieError('Upload succeeded but no URL was returned.', 502);
-      urls.push(url);
+      urls.push(await uploadBase64(dataUrl));
     }
     res.json({ urls });
   })
@@ -209,6 +232,81 @@ app.get(
   })
 );
 
+// Competitor "database": search the Meta Ad Library for a brand's ads.
+app.get(
+  '/api/spy',
+  asyncRoute(async (req, res) => {
+    if (!metaConfigured()) {
+      throw new KieError('Competitor search needs a META_ACCESS_TOKEN in web/.env.', 400);
+    }
+    try {
+      const result = await searchAds({
+        q: req.query.q,
+        countries: req.query.countries || 'US',
+        limit: req.query.limit || 12,
+        mediaType: req.query.mediaType || 'all',
+        activeOnly: req.query.activeOnly === 'true',
+        sortBy: req.query.sortBy || 'impressions_high_to_low',
+        days: Number(req.query.days) || 365,
+      });
+      res.json(result);
+    } catch (err) {
+      throw new KieError(err.message || 'Meta Ad Library request failed.', 400);
+    }
+  })
+);
+
+// Clone a competitor ad: use it as a reference and regenerate for the user's product.
+app.post(
+  '/api/clone',
+  asyncRoute(async (req, res) => {
+    const kind = req.body.kind === 'video' ? 'video' : 'image';
+    const product = (req.body.product || '').trim();
+    if (!product) throw new KieError('Describe your product to clone the ad for.', 400);
+
+    const modelId = req.body.modelId || (kind === 'video' ? 'seedance-2' : 'nano-banana-pro');
+    const model = getModel(modelId);
+    if (!model || model.kind !== kind) throw new KieError('Invalid clone model.', 400);
+    if (!model.caps.referenceImages) throw new KieError('This model cannot take a reference image.', 400);
+
+    // Resolve the reference creative to a KIE-hosted URL.
+    let refUrl = null;
+    if (req.body.referenceImageDataUrl?.startsWith('data:')) {
+      refUrl = await uploadBase64(req.body.referenceImageDataUrl, 'kie-studio/clone');
+    } else if (req.body.referenceImageUrl) {
+      try {
+        refUrl = await uploadFromUrl(req.body.referenceImageUrl);
+      } catch {
+        refUrl = req.body.referenceImageUrl; // fall back to the raw URL
+      }
+    }
+    if (!refUrl) throw new KieError('Provide a reference ad image (upload or URL) to clone.', 400);
+
+    const brand = (req.body.brand || '').trim();
+    const forWhom = brand ? `${product} by ${brand}` : product;
+    const prompt =
+      kind === 'video'
+        ? `Recreate this advertisement as a short, modern video ad, matching the reference's overall style, pacing, framing, lighting, and energy — but for this product: ${forWhom}. Swap in the new product naturally. Keep it authentic and high-quality. Do NOT reproduce the original brand's logos, names, or trademarked elements.`
+        : `Recreate this advertisement as a new image creative. Keep the same overall layout, composition, framing, typography style, and color mood as the reference image, but replace the product, branding, and any text so the ad is for this product: ${forWhom}. Photorealistic, clean, professional ad creative. Do NOT reproduce the original brand's logos, names, or trademarked text.`;
+
+    const body = model.build({
+      prompt,
+      aspectRatio: req.body.aspectRatio,
+      resolution: req.body.resolution,
+      duration: req.body.duration,
+      referenceImageUrls: [refUrl],
+      generateAudio: req.body.generateAudio,
+      outputFormat: req.body.outputFormat,
+    });
+    const createPath = model.endpoint === 'veo' ? '/api/v1/veo/generate' : '/api/v1/jobs/createTask';
+    const json = await kieFetch(createPath, { method: 'POST', body });
+    const taskId = json.data?.taskId || json.data?.task_id;
+    if (!taskId) throw new KieError('KIE.AI did not return a task id.', 502);
+
+    res.json({ taskId, endpoint: model.endpoint, modelId: model.id, kind, referenceUrl: refUrl });
+  })
+);
+
 // SPA fallback.
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -217,5 +315,6 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`\n  KIE Studio running at http://localhost:${PORT}`);
   console.log(`  KIE base URL: ${KIE_BASE_URL}`);
-  console.log(`  API key: ${KIE_API_KEY ? 'loaded ✓' : 'MISSING ✗  (add KIE_API_KEY to web/.env)'}\n`);
+  console.log(`  KIE key: ${KIE_API_KEY ? 'loaded ✓' : 'MISSING ✗  (add KIE_API_KEY to web/.env)'}`);
+  console.log(`  Meta token: ${metaConfigured() ? 'loaded ✓ (competitor search enabled)' : 'not set (competitor search disabled)'}\n`);
 });

@@ -60,6 +60,7 @@ async function initConfig() {
   const statusEl = $('#keyStatus');
   try {
     const cfg = await api('/api/config');
+    state.hasMetaToken = cfg.hasMetaToken;
     if (cfg.hasKey) {
       statusEl.textContent = 'Connected';
       statusEl.className = 'kie-card-sub ok';
@@ -427,6 +428,208 @@ function renderGallery() {
   });
 }
 
+/* ----------------------------------------------------------------- spy ---- */
+function fmtDate(s) {
+  if (!s) return '';
+  try {
+    return new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' });
+  } catch {
+    return s;
+  }
+}
+
+async function runSpy() {
+  if (!state.hasMetaToken) return;
+  const q = $('#spyQuery').value.trim();
+  if (!q) return;
+  const status = $('#spyStatus');
+  const grid = $('#spyGrid');
+  status.textContent = `Searching the Meta Ad Library for “${q}”…`;
+  grid.innerHTML = '';
+  $('#spyGo').disabled = true;
+  try {
+    const params = new URLSearchParams({
+      q,
+      countries: $('#spyCountries').value.trim() || 'US',
+      mediaType: $('#spyMedia').value,
+      sortBy: $('#spySort').value,
+      activeOnly: $('#spyActive').checked ? 'true' : 'false',
+      limit: '12',
+    });
+    const { ads } = await api('/api/spy?' + params.toString());
+    status.textContent = ads.length ? `Found ${ads.length} ad(s).` : 'No ads found. Try another brand, country, or “Upload an ad to clone”.';
+    renderAds(ads);
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+  } finally {
+    $('#spyGo').disabled = false;
+  }
+}
+
+function renderAds(ads) {
+  const grid = $('#spyGrid');
+  grid.innerHTML = '';
+  ads.forEach((ad) => {
+    const card = document.createElement('div');
+    card.className = 'ad-card';
+    const media = ad.preview
+      ? `<img class="ad-media" src="${ad.preview}" alt="" loading="lazy" onerror="this.classList.add('placeholder');this.replaceWith(Object.assign(document.createElement('div'),{className:'ad-media placeholder',textContent:'Preview unavailable — open snapshot'}))"/>`
+      : `<div class="ad-media placeholder">Preview unavailable — open snapshot to view</div>`;
+    const plats = (ad.platforms || []).map((p) => `<span class="ad-plat">${p}</span>`).join('');
+    const dates = `${fmtDate(ad.startTime)}${ad.stopTime ? ' – ' + fmtDate(ad.stopTime) : ' – active'}`;
+    card.innerHTML = `
+      ${media}
+      <div class="ad-meta">
+        <div class="ad-page">${ad.pageName || 'Unknown page'}</div>
+        <div class="ad-dates">${dates}</div>
+        <div class="ad-plats">${plats}</div>
+        ${ad.body ? `<div class="ad-body">${ad.body}</div>` : ''}
+        <div class="ad-actions">
+          <a class="pill-btn" href="${ad.snapshotUrl}" target="_blank" rel="noopener">View</a>
+          <button class="pill-btn primary clone-this">Clone</button>
+        </div>
+      </div>`;
+    $('.clone-this', card).addEventListener('click', () => {
+      const imgUrl = ad.preview || ad.images?.[0];
+      if (!imgUrl) {
+        alert('No downloadable creative was found for this ad. Open the snapshot, screenshot it, then use “Upload an ad to clone”.');
+        return;
+      }
+      openCloneSheet({ referenceImageUrl: imgUrl, previewSrc: imgUrl, meta: `${ad.pageName} · ${dates}` });
+    });
+    grid.appendChild(card);
+  });
+}
+
+/* ---------------------------------------------------------------- clone ---- */
+let cloneCtx = null;
+
+function openCloneSheet(ctx) {
+  cloneCtx = ctx;
+  $('#cloneRefImg').src = ctx.previewSrc;
+  $('#cloneRefMeta').textContent = ctx.meta || 'Reference creative';
+  $('#cloneError').classList.add('hidden');
+  $('#cloneResult').classList.add('hidden');
+  $('#cloneResult').innerHTML = '';
+  // default to image output
+  $$('#cloneKind button').forEach((b) => b.classList.toggle('active', b.dataset.kind === 'image'));
+  populateCloneModels('image');
+  $('#cloneBackdrop').classList.remove('hidden');
+}
+
+function closeCloneSheet() {
+  $('#cloneBackdrop').classList.add('hidden');
+  cloneCtx = null;
+}
+
+function populateCloneModels(kind) {
+  const sel = $('#cloneModel');
+  sel.innerHTML = '';
+  state.models
+    .filter((m) => m.kind === kind && m.caps.referenceImages)
+    .forEach((m) => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = `${m.label} · ${m.provider}`;
+      sel.appendChild(opt);
+    });
+}
+
+async function runClone() {
+  if (!cloneCtx) return;
+  const product = $('#cloneProduct').value.trim();
+  const err = $('#cloneError');
+  if (!product) {
+    err.textContent = 'Describe your product first.';
+    err.classList.remove('hidden');
+    return;
+  }
+  err.classList.add('hidden');
+  const kind = $('#cloneKind button.active').dataset.kind;
+  const modelId = $('#cloneModel').value;
+  const btn = $('#cloneGo');
+  btn.disabled = true;
+  $('#cloneGoLabel').textContent = 'Cloning…';
+  const resultBox = $('#cloneResult');
+  resultBox.classList.remove('hidden');
+  resultBox.innerHTML = `<div class="clone-loading"><div class="spinner"></div><p>Recreating the ad for your product…</p></div>`;
+
+  try {
+    const payload = { kind, modelId, product, brand: $('#cloneBrand').value.trim() };
+    if (cloneCtx.referenceImageDataUrl) payload.referenceImageDataUrl = cloneCtx.referenceImageDataUrl;
+    else payload.referenceImageUrl = cloneCtx.referenceImageUrl;
+
+    const { taskId, endpoint } = await api('/api/clone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const model = state.models.find((m) => m.id === modelId);
+    const url = await pollClone(taskId, endpoint, kind);
+    renderCloneResult(url, kind, model, product);
+    refreshCredits();
+  } catch (e) {
+    err.textContent = e.message;
+    err.classList.remove('hidden');
+    resultBox.classList.add('hidden');
+  } finally {
+    btn.disabled = false;
+    $('#cloneGoLabel').textContent = 'Generate clone';
+  }
+}
+
+function pollClone(taskId, endpoint, kind) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tick = async () => {
+      try {
+        const r = await api(`/api/task?taskId=${encodeURIComponent(taskId)}&endpoint=${endpoint}`);
+        const elapsed = (Date.now() - start) / 1000;
+        const load = $('.clone-loading p', $('#cloneResult'));
+        if (load) load.textContent = `Recreating the ad… ${Math.round(elapsed)}s`;
+        if (r.state === 'success') {
+          const url = r.resultUrls?.[0];
+          if (!url) return reject(new Error('Completed but no result URL.'));
+          return resolve(url);
+        }
+        if (r.state === 'fail') return reject(new Error(r.error || 'Generation failed.'));
+        if (elapsed > 900) return reject(new Error('Timed out.'));
+        setTimeout(tick, 3000);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    tick();
+  });
+}
+
+function renderCloneResult(url, kind, model, prompt) {
+  const box = $('#cloneResult');
+  box.innerHTML = '';
+  const media =
+    kind === 'video'
+      ? Object.assign(document.createElement('video'), { src: url, controls: true, autoplay: true, loop: true, playsInline: true })
+      : Object.assign(document.createElement('img'), { src: url, alt: prompt });
+  const actions = document.createElement('div');
+  actions.className = 'result-actions';
+  actions.style.marginTop = '14px';
+  const dl = document.createElement('a');
+  dl.className = 'pill-btn primary';
+  dl.href = url;
+  dl.target = '_blank';
+  dl.rel = 'noopener';
+  dl.textContent = 'Download';
+  actions.appendChild(dl);
+  box.append(media, actions);
+  saveGalleryItem({ id: Date.now(), kind, modelLabel: `Clone · ${model?.label || ''}`, prompt, url, ts: Date.now() });
+}
+
+async function handleAdUpload(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const dataUrl = await fileToDataUrl(file);
+  openCloneSheet({ referenceImageDataUrl: dataUrl, previewSrc: dataUrl, meta: 'Uploaded ad · ' + file.name });
+}
+
 /* ------------------------------------------------------------- navigation - */
 function setView(view) {
   state.view = view;
@@ -434,13 +637,24 @@ function setView(view) {
 
   const compose = $('#view-compose');
   const gallery = $('#view-gallery');
+  const spy = $('#view-spy');
+  [compose, gallery, spy].forEach((el) => el.classList.add('hidden'));
+
   if (view === 'gallery') {
-    compose.classList.add('hidden');
     gallery.classList.remove('hidden');
     renderGallery();
     return;
   }
-  gallery.classList.add('hidden');
+  if (view === 'spy') {
+    spy.classList.remove('hidden');
+    const note = $('#spyNote');
+    note.textContent = state.hasMetaToken
+      ? 'Tip: sort by “Longest running” to find their proven winners. Cloning uses only layout & style — never their logos/trademarks.'
+      : 'Competitor search is disabled (no META_ACCESS_TOKEN). You can still “Upload an ad to clone” to clone any screenshot with AI.';
+    $('#spyGo').disabled = !state.hasMetaToken;
+    $('#spyQuery').disabled = !state.hasMetaToken;
+    return;
+  }
   compose.classList.remove('hidden');
   state.kind = view; // 'video' | 'image'
   $('#composeTitle').textContent = view === 'video' ? 'Create Video' : 'Create Image';
@@ -479,6 +693,31 @@ function wireEvents() {
     })
   );
   dz.addEventListener('drop', (e) => addFiles([...e.dataTransfer.files]));
+
+  // Spy
+  $('#spyGo').addEventListener('click', runSpy);
+  $('#spyQuery').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') runSpy();
+  });
+  $('#spyUploadBtn').addEventListener('click', () => $('#spyUploadInput').click());
+  $('#spyUploadInput').addEventListener('change', (e) => {
+    if (e.target.files[0]) handleAdUpload(e.target.files[0]);
+    e.target.value = '';
+  });
+
+  // Clone sheet
+  $('#cloneClose').addEventListener('click', closeCloneSheet);
+  $('#cloneBackdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'cloneBackdrop') closeCloneSheet();
+  });
+  $('#cloneGo').addEventListener('click', runClone);
+  $$('#cloneKind button').forEach((b) =>
+    b.addEventListener('click', () => {
+      $$('#cloneKind button').forEach((x) => x.classList.remove('active'));
+      b.classList.add('active');
+      populateCloneModels(b.dataset.kind);
+    })
+  );
 }
 
 /* -------------------------------------------------------------- bootstrap - */

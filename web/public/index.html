@@ -48,6 +48,9 @@
             <button class="sidenav-item" data-view="image">
               <span class="sidenav-ico">🖼️</span> Image
             </button>
+            <button class="sidenav-item" data-view="spy">
+              <span class="sidenav-ico">🔍</span> Spy
+            </button>
             <button class="sidenav-item" data-view="gallery">
               <span class="sidenav-ico">✦</span> Gallery
             </button>
@@ -119,6 +122,49 @@
             </div>
           </div>
 
+          <!-- Spy view (competitor ad library) -->
+          <div class="view hidden" id="view-spy">
+            <header class="content-head">
+              <h1>Competitor Spy</h1>
+              <p>Pull a brand's live ads from the Meta Ad Library, then clone the winners with AI.</p>
+            </header>
+
+            <div class="panel spy-search">
+              <div class="spy-row">
+                <input id="spyQuery" class="spy-input" type="text" placeholder="Competitor brand name or Page ID (e.g. Gymshark)" />
+                <button class="generate-btn spy-go" id="spyGo">Search</button>
+              </div>
+              <div class="spy-filters">
+                <label class="spy-filter">Country
+                  <input id="spyCountries" class="mini-input" type="text" value="US" />
+                </label>
+                <label class="spy-filter">Media
+                  <select id="spyMedia" class="mini-select">
+                    <option value="all">All</option>
+                    <option value="video">Video</option>
+                    <option value="image">Image</option>
+                  </select>
+                </label>
+                <label class="spy-filter">Sort
+                  <select id="spySort" class="mini-select">
+                    <option value="impressions_high_to_low">Top reach</option>
+                    <option value="longest_running">Longest running</option>
+                    <option value="most_recent">Most recent</option>
+                  </select>
+                </label>
+                <label class="spy-filter checkbox">
+                  <input id="spyActive" type="checkbox" /> Active only
+                </label>
+                <button class="pill-btn" id="spyUploadBtn">Upload an ad to clone ↑</button>
+                <input type="file" id="spyUploadInput" accept="image/*" hidden />
+              </div>
+              <div class="spy-note" id="spyNote"></div>
+            </div>
+
+            <div class="spy-status" id="spyStatus"></div>
+            <div class="spy-grid" id="spyGrid"></div>
+          </div>
+
           <!-- Gallery view -->
           <div class="view hidden" id="view-gallery">
             <header class="content-head">
@@ -134,6 +180,43 @@
         </section>
       </div>
     </main>
+
+    <!-- Clone sheet (modal) -->
+    <div class="sheet-backdrop hidden" id="cloneBackdrop">
+      <div class="sheet" id="cloneSheet">
+        <div class="sheet-head">
+          <h2>Clone this ad</h2>
+          <button class="sheet-close" id="cloneClose">×</button>
+        </div>
+        <div class="sheet-body">
+          <div class="clone-ref">
+            <img id="cloneRefImg" alt="Reference ad" />
+            <div class="clone-ref-meta" id="cloneRefMeta"></div>
+          </div>
+          <div class="clone-form">
+            <label class="field-label">Your product</label>
+            <textarea id="cloneProduct" class="prompt" rows="3" placeholder="e.g. a matcha energy drink in a slim green can, for Gen-Z gym-goers"></textarea>
+
+            <label class="field-label">Brand name (optional)</label>
+            <input id="cloneBrand" class="spy-input" type="text" placeholder="Your brand" />
+
+            <div class="clone-opts">
+              <label class="field-label">Output</label>
+              <div class="segmented" id="cloneKind">
+                <button data-kind="image" class="active">Image</button>
+                <button data-kind="video">Video</button>
+              </div>
+              <label class="field-label">Model</label>
+              <select id="cloneModel" class="mini-select wide"></select>
+            </div>
+
+            <button class="generate-btn" id="cloneGo"><span id="cloneGoLabel">Generate clone</span></button>
+            <div class="error-line hidden" id="cloneError"></div>
+          </div>
+        </div>
+        <div class="clone-result hidden" id="cloneResult"></div>
+      </div>
+    </div>
 
     <script src="app.js"></script>
   </body>
