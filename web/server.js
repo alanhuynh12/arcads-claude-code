@@ -250,11 +250,14 @@ app.get(
       const result = await searchAds({
         q: req.query.q,
         countries: req.query.countries || 'US',
-        limit: req.query.limit || 12,
+        limit: req.query.limit || 24,
         mediaType: req.query.mediaType || 'all',
         activeOnly: req.query.activeOnly === 'true',
         sortBy: req.query.sortBy || 'impressions_high_to_low',
         days: Number(req.query.days) || 365,
+        languages: req.query.languages || '',
+        platforms: req.query.platforms || '',
+        adType: req.query.adType || 'ALL',
       });
       res.json(result);
     } catch (err) {

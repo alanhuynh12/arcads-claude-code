@@ -23,22 +23,31 @@ function token() {
   return t;
 }
 
-const ARCHIVE_FIELDS = [
+// Fields safe for ANY ad_type.
+const BASE_FIELDS = [
   'id',
+  'ad_creation_time',
   'ad_delivery_start_time',
   'ad_delivery_stop_time',
   'ad_snapshot_url',
   'page_id',
   'page_name',
   'publisher_platforms',
+  'languages',
   'ad_creative_bodies',
   'ad_creative_link_titles',
   'ad_creative_link_captions',
-].join(',');
+  'eu_total_reach', // present for EU-delivered ads
+];
+// Only valid (and only returned) for political / issue ads.
+const POLITICAL_FIELDS = ['impressions', 'spend', 'currency', 'estimated_audience_size'];
 
 async function graphGet(pathname, params) {
   const url = new URL(`${BASE_URL}/${pathname}`);
-  Object.entries(params).forEach(([k, v]) => v != null && url.searchParams.set(k, v));
+  Object.entries(params).forEach(([k, v]) => {
+    if (v == null) return;
+    url.searchParams.set(k, Array.isArray(v) ? JSON.stringify(v) : String(v));
+  });
   const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
   const json = await res.json().catch(() => ({}));
   if (json.error) {
@@ -92,15 +101,49 @@ function mediaTypeParam(mediaType) {
   return null; // all
 }
 
+function daysBetween(start, stop) {
+  if (!start) return null;
+  const s = new Date(start).getTime();
+  const e = stop ? new Date(stop).getTime() : Date.now();
+  if (Number.isNaN(s)) return null;
+  return Math.max(0, Math.round((e - s) / 86400000));
+}
+
+// Normalize {lower_bound, upper_bound} range objects to numbers + label.
+function normRange(r) {
+  if (r == null) return null;
+  if (typeof r === 'number' || typeof r === 'string') {
+    const n = Number(r);
+    return Number.isFinite(n) ? { value: n, label: abbrev(n) } : null;
+  }
+  const lo = r.lower_bound != null ? Number(r.lower_bound) : null;
+  const hi = r.upper_bound != null ? Number(r.upper_bound) : null;
+  if (lo == null && hi == null) return null;
+  const value = hi != null ? hi : lo; // sort on the upper bound
+  const label = hi != null && lo != null && lo !== hi ? `${abbrev(lo)}–${abbrev(hi)}` : abbrev(value);
+  return { value, label };
+}
+
+function abbrev(n) {
+  n = Number(n) || 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
+  return String(n);
+}
+
 export async function searchAds(opts = {}) {
   const {
     q,
     countries = 'US',
-    limit = 12,
+    limit = 24,
     mediaType = 'all',
     activeOnly = false,
     sortBy = 'impressions_high_to_low',
     days = 365,
+    languages = '',
+    platforms = '',
+    adType = 'ALL',
   } = opts;
 
   if (!q || !String(q).trim()) throw new Error('A brand name or page ID is required.');
@@ -111,20 +154,28 @@ export async function searchAds(opts = {}) {
 
   const pageId = await resolvePageId(q, countries, dateMin, dateMax);
 
+  const isPolitical = adType === 'POLITICAL_AND_ISSUE_ADS';
+  const fields = [...BASE_FIELDS, ...(isPolitical ? POLITICAL_FIELDS : [])].join(',');
+
   const params = {
     access_token: token(),
     ad_reached_countries: countries,
     ad_delivery_date_min: dateMin,
     ad_delivery_date_max: dateMax,
     ad_active_status: activeOnly ? 'ACTIVE' : 'ALL',
+    ad_type: adType || 'ALL',
     sort_by: sortBy,
-    fields: ARCHIVE_FIELDS,
-    limit: Math.min(Number(limit) || 12, 50),
+    fields,
+    limit: Math.min(Number(limit) || 24, 60),
   };
   if (pageId) params.search_page_ids = pageId;
   else params.search_terms = String(q).trim();
   const mt = mediaTypeParam(mediaType);
   if (mt) params.media_type = mt;
+  const langs = String(languages).split(',').map((s) => s.trim()).filter(Boolean);
+  if (langs.length) params.languages = langs;
+  const plats = String(platforms).split(',').map((s) => s.trim()).filter(Boolean);
+  if (plats.length) params.publisher_platforms = plats;
 
   const data = await graphGet('ads_archive', params);
   const ads = (data.data || []).map((ad) => ({
@@ -134,16 +185,25 @@ export async function searchAds(opts = {}) {
     snapshotUrl: ad.ad_snapshot_url,
     startTime: ad.ad_delivery_start_time,
     stopTime: ad.ad_delivery_stop_time || null,
+    daysRunning: daysBetween(ad.ad_delivery_start_time, ad.ad_delivery_stop_time),
+    isActive: !ad.ad_delivery_stop_time,
     platforms: ad.publisher_platforms || [],
+    languages: ad.languages || [],
     body: (ad.ad_creative_bodies || [])[0] || '',
     title: (ad.ad_creative_link_titles || [])[0] || '',
+    // Metrics (present only for political/issue or EU-delivered ads):
+    impressions: normRange(ad.impressions),
+    spend: normRange(ad.spend),
+    reach: normRange(ad.eu_total_reach),
+    audienceSize: normRange(ad.estimated_audience_size),
+    currency: ad.currency || null,
     preview: null,
     images: [],
     videos: [],
   }));
 
   await enrichCreative(ads);
-  return { pageResolved: pageId, ads };
+  return { pageResolved: pageId, hasMetrics: isPolitical, ads };
 }
 
 // Best-effort: read each ad's public snapshot page and pull out media URLs.

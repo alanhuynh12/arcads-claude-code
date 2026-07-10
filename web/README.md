@@ -27,6 +27,29 @@ The **Spy** tab is the competitor "database": type a brand name and it queries
 the public **Meta Ad Library** for their running ads, extracts the creative, and
 shows them in a grid (sort by *longest running* to find their proven winners).
 
+**Filters** (server-side, sent to the Ad Library API): country, time range,
+media type, platform (FB / IG / Messenger / Audience Network), language, sort
+(top reach / longest running / most recent), ad type, and active-only.
+
+**Re-rank / refine** (client-side, instant): min **days running**, re-rank by
+days running / reach / impressions / newest, and "only ads with metrics".
+
+Each ad card shows the metrics the API actually returns:
+
+- **Days running** 🗓 — always available; the badge turns *hot* at 30+ days
+  (long-running ads are usually profitable — this is your best winner signal).
+- **Reach** 👁 — for EU-delivered ads (`eu_total_reach`).
+- **Impressions** 📊 / **Spend** 💰 / **Audience size** 🎯 — only for
+  **political / issue** ads (set the *Type* filter to unlock them).
+
+> **Honest limitation:** the Meta Ad Library **API** does **not** expose per-ad
+> **likes, comments, shares, or organic views** for commercial ads, and
+> impressions/spend are returned **only** for political/issue ads (reach only for
+> EU ads). That's a Meta restriction, not a bug. For commercial competitors,
+> **days running** is the reliable "is this a winner?" signal, which is why it's
+> shown on every card and is filterable/sortable. Third-party spy tools that show
+> likes/views obtain them by scraping, not via this API.
+
 Hit **Clone** on any ad (or **Upload an ad to clone** from a screenshot) and the
 studio recreates it for *your* product:
 

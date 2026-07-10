@@ -138,12 +138,32 @@
                 <label class="spy-filter">Country
                   <input id="spyCountries" class="mini-input" type="text" value="US" />
                 </label>
+                <label class="spy-filter">Time
+                  <select id="spyDays" class="mini-select">
+                    <option value="7">Last 7 days</option>
+                    <option value="30">Last 30 days</option>
+                    <option value="90">Last 90 days</option>
+                    <option value="365" selected>Last year</option>
+                  </select>
+                </label>
                 <label class="spy-filter">Media
                   <select id="spyMedia" class="mini-select">
                     <option value="all">All</option>
                     <option value="video">Video</option>
                     <option value="image">Image</option>
                   </select>
+                </label>
+                <label class="spy-filter">Platform
+                  <select id="spyPlatform" class="mini-select">
+                    <option value="">All platforms</option>
+                    <option value="facebook">Facebook</option>
+                    <option value="instagram">Instagram</option>
+                    <option value="messenger">Messenger</option>
+                    <option value="audience_network">Audience Network</option>
+                  </select>
+                </label>
+                <label class="spy-filter">Language
+                  <input id="spyLang" class="mini-input" type="text" placeholder="en" />
                 </label>
                 <label class="spy-filter">Sort
                   <select id="spySort" class="mini-select">
@@ -152,8 +172,32 @@
                     <option value="most_recent">Most recent</option>
                   </select>
                 </label>
+                <label class="spy-filter">Type
+                  <select id="spyAdType" class="mini-select">
+                    <option value="ALL">All ads</option>
+                    <option value="POLITICAL_AND_ISSUE_ADS">Political / issue (unlocks impressions + spend)</option>
+                  </select>
+                </label>
                 <label class="spy-filter checkbox">
                   <input id="spyActive" type="checkbox" /> Active only
+                </label>
+              </div>
+
+              <div class="spy-filters spy-refine">
+                <label class="spy-filter">Min days running
+                  <input id="spyMinDays" class="mini-input" type="number" min="0" value="0" />
+                </label>
+                <label class="spy-filter">Re-rank by
+                  <select id="spyClientSort" class="mini-select">
+                    <option value="default">Meta order</option>
+                    <option value="days">Days running ↓</option>
+                    <option value="reach">Reach ↓</option>
+                    <option value="impressions">Impressions ↓</option>
+                    <option value="newest">Newest</option>
+                  </select>
+                </label>
+                <label class="spy-filter checkbox">
+                  <input id="spyMetricsOnly" type="checkbox" /> Only ads with metrics
                 </label>
                 <button class="pill-btn" id="metaTestBtn">Test connection</button>
                 <button class="pill-btn" id="spyUploadBtn">Upload an ad to clone ↑</button>

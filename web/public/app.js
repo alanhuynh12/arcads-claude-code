@@ -455,19 +455,64 @@ async function runSpy() {
     const params = new URLSearchParams({
       q,
       countries: $('#spyCountries').value.trim() || 'US',
+      days: $('#spyDays').value,
       mediaType: $('#spyMedia').value,
+      platforms: $('#spyPlatform').value,
+      languages: $('#spyLang').value.trim(),
       sortBy: $('#spySort').value,
+      adType: $('#spyAdType').value,
       activeOnly: $('#spyActive').checked ? 'true' : 'false',
-      limit: '12',
+      limit: '24',
     });
-    const { ads } = await api('/api/spy?' + params.toString());
-    status.textContent = ads.length ? `Found ${ads.length} ad(s).` : 'No ads found. Try another brand, country, or “Upload an ad to clone”.';
-    renderAds(ads);
+    const { ads, hasMetrics } = await api('/api/spy?' + params.toString());
+    state.spyAds = ads;
+    state.spyHasMetrics = hasMetrics;
+    applySpyFilters();
   } catch (e) {
     status.textContent = 'Error: ' + e.message;
   } finally {
     $('#spyGo').disabled = false;
   }
+}
+
+function applySpyFilters() {
+  const all = state.spyAds || [];
+  const minDays = Number($('#spyMinDays').value) || 0;
+  const metricsOnly = $('#spyMetricsOnly').checked;
+  const sortMode = $('#spyClientSort').value;
+
+  let ads = all.filter((a) => (a.daysRunning ?? 0) >= minDays);
+  if (metricsOnly) ads = ads.filter((a) => a.impressions || a.reach || a.spend);
+
+  const val = (r) => (r ? r.value : -1);
+  if (sortMode === 'days') ads = [...ads].sort((a, b) => (b.daysRunning ?? 0) - (a.daysRunning ?? 0));
+  else if (sortMode === 'reach') ads = [...ads].sort((a, b) => val(b.reach) - val(a.reach));
+  else if (sortMode === 'impressions') ads = [...ads].sort((a, b) => val(b.impressions) - val(a.impressions));
+  else if (sortMode === 'newest') ads = [...ads].sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+
+  const status = $('#spyStatus');
+  if (!all.length) {
+    status.textContent = 'No ads found. Try another brand, country, wider time range, or “Upload an ad to clone”.';
+  } else {
+    const note = state.spyHasMetrics
+      ? ''
+      : ' · impressions/spend need “Political / issue” type; likes/views aren’t in the API — use “days running” as the winner signal.';
+    status.textContent = `Showing ${ads.length} of ${all.length} ad(s).${note}`;
+  }
+  renderAds(ads);
+}
+
+function metricBadges(ad) {
+  const b = [];
+  if (ad.daysRunning != null) {
+    const hot = ad.daysRunning >= 30 ? ' hot' : '';
+    b.push(`<span class="ad-stat${hot}" title="Days running (winner signal)">🗓 ${ad.daysRunning}d</span>`);
+  }
+  if (ad.reach) b.push(`<span class="ad-stat" title="EU total reach">👁 ${ad.reach.label}</span>`);
+  if (ad.impressions) b.push(`<span class="ad-stat" title="Impressions">📊 ${ad.impressions.label}</span>`);
+  if (ad.spend) b.push(`<span class="ad-stat" title="Spend${ad.currency ? ' (' + ad.currency + ')' : ''}">💰 ${ad.spend.label}</span>`);
+  if (ad.audienceSize) b.push(`<span class="ad-stat" title="Estimated audience size">🎯 ${ad.audienceSize.label}</span>`);
+  return b.join('');
 }
 
 function renderAds(ads) {
@@ -485,6 +530,7 @@ function renderAds(ads) {
       ${media}
       <div class="ad-meta">
         <div class="ad-page">${ad.pageName || 'Unknown page'}</div>
+        <div class="ad-stats">${metricBadges(ad)}</div>
         <div class="ad-dates">${dates}</div>
         <div class="ad-plats">${plats}</div>
         ${ad.body ? `<div class="ad-body">${ad.body}</div>` : ''}
@@ -789,6 +835,11 @@ function wireEvents() {
   $('#spyQuery').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') runSpy();
   });
+  ['#spyMinDays', '#spyClientSort', '#spyMetricsOnly'].forEach((sel) =>
+    $(sel).addEventListener('input', () => {
+      if (state.spyAds) applySpyFilters();
+    })
+  );
   $('#metaTestBtn').addEventListener('click', testMeta);
   $('#spyUploadBtn').addEventListener('click', () => $('#spyUploadInput').click());
   $('#spyUploadInput').addEventListener('change', (e) => {
