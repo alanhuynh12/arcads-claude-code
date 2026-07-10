@@ -61,6 +61,8 @@ async function initConfig() {
   try {
     const cfg = await api('/api/config');
     state.hasMetaToken = cfg.hasMetaToken;
+    state.canPublish = cfg.canPublish;
+    state.metaPublish = cfg.metaPublish || {};
     if (cfg.hasKey) {
       statusEl.textContent = 'Connected';
       statusEl.className = 'kie-card-sub ok';
@@ -396,6 +398,8 @@ function renderResult(url, kind, model, prompt) {
   again.textContent = 'New';
   again.addEventListener('click', () => setStage('empty'));
   actions.append(dl, again);
+  const pub = publishButton(url, kind);
+  if (pub) actions.appendChild(pub);
   box.appendChild(actions);
 
   setStage('result');
@@ -620,6 +624,8 @@ function renderCloneResult(url, kind, model, prompt) {
   dl.rel = 'noopener';
   dl.textContent = 'Download';
   actions.appendChild(dl);
+  const pub = publishButton(url, kind);
+  if (pub) actions.appendChild(pub);
   box.append(media, actions);
   saveGalleryItem({ id: Date.now(), kind, modelLabel: `Clone · ${model?.label || ''}`, prompt, url, ts: Date.now() });
 }
@@ -628,6 +634,90 @@ async function handleAdUpload(file) {
   if (!file || !file.type.startsWith('image/')) return;
   const dataUrl = await fileToDataUrl(file);
   openCloneSheet({ referenceImageDataUrl: dataUrl, previewSrc: dataUrl, meta: 'Uploaded ad · ' + file.name });
+}
+
+/* ------------------------------------------------------- meta test/publish - */
+async function testMeta() {
+  const note = $('#spyNote');
+  note.textContent = 'Testing Meta connection…';
+  try {
+    const r = await api('/api/meta/test');
+    note.textContent = r.ok ? `✅ Meta connected (${r.scope}${r.who ? ' · ' + r.who : ''}).` : `❌ Meta error: ${r.error}`;
+  } catch (e) {
+    note.textContent = '❌ ' + e.message;
+  }
+}
+
+let pubCtx = null;
+function openPublishSheet(mediaUrl, kind) {
+  pubCtx = { mediaUrl, kind };
+  const box = $('#pubPreview');
+  box.innerHTML =
+    kind === 'video'
+      ? `<video src="${mediaUrl}" muted loop autoplay playsinline></video>`
+      : `<img src="${mediaUrl}" alt="creative"/>`;
+  $('#pubError').classList.add('hidden');
+  $('#pubSuccess').classList.add('hidden');
+  $('#pubGoLabel').textContent = 'Publish (paused)';
+  $('#pubGo').disabled = false;
+  $('#pubBackdrop').classList.remove('hidden');
+}
+function closePublishSheet() {
+  $('#pubBackdrop').classList.add('hidden');
+  pubCtx = null;
+}
+
+async function runPublish() {
+  if (!pubCtx) return;
+  const err = $('#pubError');
+  const ok = $('#pubSuccess');
+  err.classList.add('hidden');
+  ok.classList.add('hidden');
+  const link = $('#pubLink').value.trim();
+  if (!link) {
+    err.textContent = 'A destination URL is required.';
+    err.classList.remove('hidden');
+    return;
+  }
+  const btn = $('#pubGo');
+  btn.disabled = true;
+  $('#pubGoLabel').textContent = pubCtx.kind === 'video' ? 'Uploading video to Meta…' : 'Publishing…';
+  try {
+    const r = await api('/api/meta/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mediaUrl: pubCtx.mediaUrl,
+        kind: pubCtx.kind,
+        link,
+        message: $('#pubMessage').value.trim(),
+        headline: $('#pubHeadline').value.trim(),
+        cta: $('#pubCta').value,
+        adsetId: $('#pubAdset').value.trim(),
+      }),
+    });
+    const mgr = 'https://adsmanager.facebook.com/adsmanager/manage/ads';
+    ok.innerHTML =
+      r.type === 'ad'
+        ? `✅ Created <strong>PAUSED ad</strong> <code>${r.id}</code> in ad set <code>${r.adsetId}</code>.<br/>Review &amp; launch it in <a href="${mgr}" target="_blank" rel="noopener">Ads Manager</a>.`
+        : `✅ Created a reusable <strong>ad creative</strong> <code>${r.id}</code>.<br/>${r.note} Open <a href="${mgr}" target="_blank" rel="noopener">Ads Manager</a>.`;
+    ok.classList.remove('hidden');
+    $('#pubGoLabel').textContent = 'Published ✓';
+  } catch (e) {
+    err.textContent = e.message;
+    err.classList.remove('hidden');
+    btn.disabled = false;
+    $('#pubGoLabel').textContent = 'Publish (paused)';
+  }
+}
+
+function publishButton(mediaUrl, kind) {
+  if (!state.canPublish) return null;
+  const b = document.createElement('button');
+  b.className = 'pill-btn meta';
+  b.textContent = 'Publish to Meta';
+  b.addEventListener('click', () => openPublishSheet(mediaUrl, kind));
+  return b;
 }
 
 /* ------------------------------------------------------------- navigation - */
@@ -699,11 +789,19 @@ function wireEvents() {
   $('#spyQuery').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') runSpy();
   });
+  $('#metaTestBtn').addEventListener('click', testMeta);
   $('#spyUploadBtn').addEventListener('click', () => $('#spyUploadInput').click());
   $('#spyUploadInput').addEventListener('change', (e) => {
     if (e.target.files[0]) handleAdUpload(e.target.files[0]);
     e.target.value = '';
   });
+
+  // Publish sheet
+  $('#pubClose').addEventListener('click', closePublishSheet);
+  $('#pubBackdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'pubBackdrop') closePublishSheet();
+  });
+  $('#pubGo').addEventListener('click', runPublish);
 
   // Clone sheet
   $('#cloneClose').addEventListener('click', closeCloneSheet);

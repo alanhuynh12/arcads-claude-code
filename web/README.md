@@ -50,6 +50,30 @@ For the deep, frame-by-frame video clone (transcription + beat mapping), the
 repo's Python `clone-ad` skill still lives at
 `skills/arcads-external-api/prompting/clone-ad/` (uses ffmpeg + whisper).
 
+## Publish to Meta (paused)
+
+Any generated or cloned creative has a **Publish to Meta** button. It:
+
+1. Uploads the media to your ad account (`/adimages` for images, `/advideos` +
+   processing wait for videos).
+2. Builds an ad creative (`object_story_spec` with your page, link, copy, CTA).
+3. If you enter an **Ad set ID**, creates a **PAUSED ad** in it. If you leave it
+   blank, it creates a **reusable ad creative** you can attach in Ads Manager.
+
+Every ad is created **PAUSED** — nothing spends until you launch it manually.
+
+Enable it by adding to `web/.env` (needs the `ads_management` scope):
+
+```bash
+META_ACCESS_TOKEN=...      # also powers the Spy tab
+META_AD_ACCOUNT_ID=act_...
+META_PAGE_ID=...
+META_IG_USER_ID=...        # optional
+META_PIXEL_ID=...          # optional (adds conversion tracking)
+```
+
+The **Test connection** button in the Spy tab verifies your Meta token.
+
 Your API key lives **only on the server** — it is never shipped to the browser.
 The server proxies all calls to KIE.AI.
 
@@ -87,6 +111,7 @@ npm start
 | Credits | KIE `GET /api/v1/chat/credit` |
 | Competitor Spy | Meta `GET graph.facebook.com/{v}/ads_archive` + snapshot scrape |
 | Clone | rehost creative → KIE generate with it as a reference image |
+| Publish to Meta | Meta `/adimages` · `/advideos` → `/ads` (PAUSED) or `/adcreatives` |
 
 The model catalog lives in [`models.js`](models.js) — each entry declares its
 capabilities (what controls to show) and a `build()` mapper that produces the

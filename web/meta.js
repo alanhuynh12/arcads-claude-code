@@ -193,6 +193,165 @@ export function extractCreative(html) {
   return { images: imgList, videos: [...videos], preview };
 }
 
+// --------------------------------------------------------------- publish ---
+// Everything below powers the "Publish to Meta" step: upload a finished
+// creative to the ad account and create a PAUSED ad (or a reusable ad creative).
+
+export function metaPublishConfig() {
+  return {
+    hasToken: Boolean(process.env.META_ACCESS_TOKEN),
+    hasAccount: Boolean(process.env.META_AD_ACCOUNT_ID),
+    hasPage: Boolean(process.env.META_PAGE_ID),
+  };
+}
+
+function adAccountId() {
+  const a = process.env.META_AD_ACCOUNT_ID;
+  if (!a) throw new Error('META_AD_ACCOUNT_ID is not set (needed to publish to Meta).');
+  return a.startsWith('act_') ? a : `act_${a}`;
+}
+
+async function graphPost(pathname, form) {
+  const body = new URLSearchParams();
+  Object.entries(form).forEach(([k, v]) => v != null && body.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v)));
+  body.set('access_token', token());
+  const res = await fetch(`${BASE_URL}/${pathname}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+    signal: AbortSignal.timeout(120000),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (json.error) throw new Error(json.error.error_user_msg || json.error.message || 'Meta API error');
+  return json;
+}
+
+// Verify the token works for Ad Library / basic reads.
+export async function testConnection() {
+  try {
+    const me = await graphGet('me', { access_token: token(), fields: 'id,name' });
+    return { ok: true, who: me.name || me.id, scope: 'user token' };
+  } catch (e) {
+    // App tokens can't hit /me — fall back to a minimal ad-library probe.
+    try {
+      await graphGet('ads_archive', {
+        access_token: token(),
+        search_terms: 'a',
+        ad_reached_countries: 'US',
+        limit: 1,
+      });
+      return { ok: true, who: 'app/system token', scope: 'ad library' };
+    } catch (e2) {
+      return { ok: false, error: e2.message || e.message };
+    }
+  }
+}
+
+async function uploadImageToAccount(mediaUrl) {
+  const res = await fetch(mediaUrl, { signal: AbortSignal.timeout(60000) });
+  if (!res.ok) throw new Error('Could not download the generated image for upload.');
+  const buf = Buffer.from(await res.arrayBuffer());
+  const json = await graphPost(`${adAccountId()}/adimages`, {
+    bytes: buf.toString('base64'),
+    name: `kie-studio-${Date.now()}.png`,
+  });
+  const first = json.images && Object.values(json.images)[0];
+  if (!first?.hash) throw new Error('Meta did not return an image hash.');
+  return first.hash;
+}
+
+async function uploadVideoToAccount(mediaUrl) {
+  const json = await graphPost(`${adAccountId()}/advideos`, {
+    file_url: mediaUrl,
+    name: `kie-studio-${Date.now()}.mp4`,
+  });
+  if (!json.id) throw new Error('Meta did not return a video id.');
+  // Poll until the video is fully processed (required before ad creation).
+  const videoId = json.id;
+  let thumb = null;
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 6000));
+    let info;
+    try {
+      info = await graphGet(videoId, {
+        access_token: token(),
+        fields: 'status,picture,thumbnails{uri,is_preferred}',
+      });
+    } catch {
+      continue;
+    }
+    const st = info.status || {};
+    const thumbs = info.thumbnails?.data || [];
+    thumb = (thumbs.find((t) => t.is_preferred) || thumbs[0] || {}).uri || info.picture || thumb;
+    if (st.video_status === 'ready') return { videoId, thumb };
+  }
+  return { videoId, thumb }; // proceed with best-effort thumb even if still processing
+}
+
+export async function publishCreative(opts = {}) {
+  const { mediaUrl, kind, link, message, headline, description, cta = 'LEARN_MORE', adsetId } = opts;
+  const cfg = metaPublishConfig();
+  if (!cfg.hasToken) throw new Error('META_ACCESS_TOKEN is not set.');
+  if (!cfg.hasAccount) throw new Error('META_AD_ACCOUNT_ID is not set.');
+  if (!cfg.hasPage) throw new Error('META_PAGE_ID is not set (required to build a Meta creative).');
+  if (!mediaUrl) throw new Error('No creative to publish.');
+  if (!link) throw new Error('A destination URL is required.');
+
+  const pageId = process.env.META_PAGE_ID;
+  const igUserId = process.env.META_IG_USER_ID;
+
+  let objectStorySpec;
+  if (kind === 'video') {
+    const { videoId, thumb } = await uploadVideoToAccount(mediaUrl);
+    objectStorySpec = {
+      page_id: pageId,
+      ...(igUserId ? { instagram_user_id: igUserId } : {}),
+      video_data: {
+        video_id: videoId,
+        ...(thumb ? { image_url: thumb } : {}),
+        ...(headline ? { title: headline } : {}),
+        ...(message ? { message } : {}),
+        ...(description ? { link_description: description } : {}),
+        call_to_action: { type: cta, value: { link } },
+      },
+    };
+  } else {
+    const imageHash = await uploadImageToAccount(mediaUrl);
+    objectStorySpec = {
+      page_id: pageId,
+      ...(igUserId ? { instagram_user_id: igUserId } : {}),
+      link_data: {
+        image_hash: imageHash,
+        link,
+        ...(headline ? { name: headline } : {}),
+        ...(message ? { message } : {}),
+        ...(description ? { description } : {}),
+        call_to_action: { type: cta, value: { link } },
+      },
+    };
+  }
+
+  const creative = { object_story_spec: objectStorySpec, contextual_multi_ads: { enroll_status: 'OPT_OUT' } };
+  const name = `KIE Studio ${kind} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+
+  if (adsetId) {
+    const ad = await graphPost(`${adAccountId()}/ads`, {
+      name,
+      adset_id: adsetId,
+      status: 'PAUSED', // never launch spend automatically
+      creative,
+      ...(process.env.META_PIXEL_ID
+        ? { tracking_specs: [{ 'action.type': ['offsite_conversion'], fb_pixel: [process.env.META_PIXEL_ID] }] }
+        : {}),
+    });
+    return { type: 'ad', id: ad.id, status: 'PAUSED', adsetId };
+  }
+
+  // No ad set → create a reusable ad creative the user can attach in Ads Manager.
+  const cr = await graphPost(`${adAccountId()}/adcreatives`, { name, ...creative });
+  return { type: 'creative', id: cr.id, note: 'Reusable ad creative created — attach it to an ad set in Ads Manager.' };
+}
+
 async function mapLimit(items, limit, fn) {
   let i = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import dotenv from 'dotenv';
 import { getModel, publicCatalog } from './models.js';
-import { metaConfigured, searchAds } from './meta.js';
+import { metaConfigured, searchAds, testConnection, publishCreative, metaPublishConfig } from './meta.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -116,7 +116,14 @@ function asyncRoute(fn) {
 
 // ---------------------------------------------------------------- routes ----
 app.get('/api/config', (req, res) => {
-  res.json({ hasKey: Boolean(KIE_API_KEY), hasMetaToken: metaConfigured(), baseUrl: KIE_BASE_URL });
+  const pub = metaPublishConfig();
+  res.json({
+    hasKey: Boolean(KIE_API_KEY),
+    hasMetaToken: metaConfigured(),
+    canPublish: pub.hasToken && pub.hasAccount && pub.hasPage,
+    metaPublish: pub,
+    baseUrl: KIE_BASE_URL,
+  });
 });
 
 app.get('/api/models', (req, res) => {
@@ -252,6 +259,39 @@ app.get(
       res.json(result);
     } catch (err) {
       throw new KieError(err.message || 'Meta Ad Library request failed.', 400);
+    }
+  })
+);
+
+// Verify the Meta token works.
+app.get(
+  '/api/meta/test',
+  asyncRoute(async (req, res) => {
+    if (!metaConfigured()) throw new KieError('No META_ACCESS_TOKEN configured in web/.env.', 400);
+    const result = await testConnection();
+    res.json(result);
+  })
+);
+
+// Publish a finished creative to Meta as a PAUSED ad (or reusable creative).
+app.post(
+  '/api/meta/publish',
+  asyncRoute(async (req, res) => {
+    const { mediaUrl, kind, link, message, headline, description, cta, adsetId } = req.body || {};
+    try {
+      const result = await publishCreative({
+        mediaUrl,
+        kind: kind === 'video' ? 'video' : 'image',
+        link,
+        message,
+        headline,
+        description,
+        cta,
+        adsetId: adsetId || undefined,
+      });
+      res.json(result);
+    } catch (err) {
+      throw new KieError(err.message || 'Publish to Meta failed.', 400);
     }
   })
 );

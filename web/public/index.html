@@ -155,6 +155,7 @@
                 <label class="spy-filter checkbox">
                   <input id="spyActive" type="checkbox" /> Active only
                 </label>
+                <button class="pill-btn" id="metaTestBtn">Test connection</button>
                 <button class="pill-btn" id="spyUploadBtn">Upload an ad to clone ↑</button>
                 <input type="file" id="spyUploadInput" accept="image/*" hidden />
               </div>
@@ -180,6 +181,49 @@
         </section>
       </div>
     </main>
+
+    <!-- Publish-to-Meta sheet (modal) -->
+    <div class="sheet-backdrop hidden" id="pubBackdrop">
+      <div class="sheet pub-sheet">
+        <div class="sheet-head">
+          <h2>Publish to Meta</h2>
+          <button class="sheet-close" id="pubClose">×</button>
+        </div>
+        <div class="pub-body">
+          <div class="pub-preview" id="pubPreview"></div>
+          <div class="pub-form">
+            <label class="field-label">Destination URL</label>
+            <input id="pubLink" class="spy-input" type="url" placeholder="https://yourstore.com/product" />
+
+            <label class="field-label">Primary text</label>
+            <textarea id="pubMessage" class="prompt" rows="3" placeholder="The main body copy shown above the creative."></textarea>
+
+            <div class="pub-2col">
+              <div>
+                <label class="field-label">Headline</label>
+                <input id="pubHeadline" class="spy-input" type="text" placeholder="Short headline" />
+              </div>
+              <div>
+                <label class="field-label">Call to action</label>
+                <select id="pubCta" class="mini-select wide">
+                  <option>LEARN_MORE</option><option>SHOP_NOW</option><option>SIGN_UP</option>
+                  <option>GET_OFFER</option><option>BUY_NOW</option><option>ORDER_NOW</option>
+                  <option>SUBSCRIBE</option><option>DOWNLOAD</option><option>GET_STARTED</option>
+                </select>
+              </div>
+            </div>
+
+            <label class="field-label">Ad set ID <span class="opt">(optional — leave blank to just save a reusable creative)</span></label>
+            <input id="pubAdset" class="spy-input" type="text" placeholder="e.g. 120200000000000000" />
+
+            <button class="generate-btn" id="pubGo"><span id="pubGoLabel">Publish (paused)</span></button>
+            <div class="pub-hint">Every ad is created <strong>PAUSED</strong> — nothing spends until you launch it in Ads Manager.</div>
+            <div class="error-line hidden" id="pubError"></div>
+            <div class="pub-success hidden" id="pubSuccess"></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Clone sheet (modal) -->
     <div class="sheet-backdrop hidden" id="cloneBackdrop">
